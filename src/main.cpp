@@ -3,9 +3,11 @@
 #include "geometrycentral/surface/vertex_position_geometry.h"
 
 #include "geometrycentral/surface/direction_fields.h"
+#include "geometrycentral/surface/stripe_patterns.h"
 
 #include "polyscope/polyscope.h"
 #include "polyscope/surface_mesh.h"
+#include "polyscope/curve_network.h"
 
 #include "args/args.hxx"
 #include "imgui.h"
@@ -95,8 +97,33 @@ int main(int argc, char **argv) {
   psMesh->setVertexTangentBasisX(vBasisX);
 
   auto vField =
-      geometrycentral::surface::computeSmoothestVertexDirectionField(*geometry);
-  psMesh->addVertexIntrinsicVectorQuantity("VF", vField);
+      geometrycentral::surface::computeCurvatureAlignedVertexDirectionField(*geometry, 2);
+  psMesh->addVertexIntrinsicVectorQuantity("VF", vField, 2);
+
+  geometry->requireEdgeLengths();
+  double avgLength = geometry->edgeLengths.toVector().sum() / mesh->nEdges();
+
+  VertexData<double> frequencies(*mesh, 2 / avgLength);
+  const auto& [stripeValues, stripeIndices, fieldIndices] = computeStripePattern(*geometry, frequencies, vField);
+  const auto& [vertices, edges] = extractPolylinesFromStripePattern(*geometry, stripeValues, stripeIndices, fieldIndices, vField, true);
+
+  std::vector<std::pair<size_t, int>> stripeCount;
+  for (size_t iF = 0; iF < mesh->nFaces(); iF++) {
+    if (stripeIndices[iF] != 0) {
+      stripeCount.push_back(std::make_pair(iF, stripeIndices[iF]));
+    } 
+  }
+  psMesh->addFaceCountQuantity("Stripe indices", stripeCount);
+
+  std::vector<std::pair<size_t, int>> fieldCount;
+  for (size_t iF = 0; iF < mesh->nFaces(); iF++) {
+    if (fieldIndices[iF] != 0) {
+      fieldCount.push_back(std::make_pair(iF, fieldIndices[iF]));
+    } 
+  }
+  psMesh->addFaceCountQuantity("Field indices", fieldCount);
+
+  polyscope::registerCurveNetwork("stripes", vertices, edges);
 
   // Give control to the polyscope gui
   polyscope::show();
